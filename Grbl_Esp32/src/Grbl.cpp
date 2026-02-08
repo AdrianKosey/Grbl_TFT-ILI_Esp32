@@ -111,6 +111,7 @@ static void reset_variables() {
     sys_pl_data_inflight = NULL;
 }
 
+
 void run_once() {
     reset_variables();
     // Start Grbl main loop. Processes program inputs and executes them.
