@@ -7,7 +7,7 @@
 #pragma once
 
 
-#define DISPLAY_CODE_FILENAME   "Custom/tft_ili9341.cpp"
+#define DISPLAY_CODE_FILENAME   "Custom/ui-TFT-ILI/tft_ili9341.cpp"
 
 // =======================================================
 //  CONFIGURACIÓN GENERAL DE LA MÁQUINA

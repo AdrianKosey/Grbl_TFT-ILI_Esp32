@@ -3,29 +3,19 @@
 #include <FS.h>
 #include <SD.h>
 #include <JPEGDecoder.h>
+#include "tft_ui_manager.h"
+#include "tft_ui_touch.h"
+#include "tft_ui_view.h"
+#include "tft_ui_painter.h"
 
 #define CALIBRATION_FILE "/TouchCalData2"  // Calibration file stored in SPIFFS
 #define REPEAT_CAL false                   // if true calibration is requested after reboot
-#define WIDTH_TOPBAR 280
-#define HEIGHT_TOPBAR 30
 
-#define WIDTH_SIDEBAR 40
-#define HEIGHT_SIDEBAR 240
-
-#define WIDTH_TOPBAR_BUTTON 20
-#define HEIGHT_TOPBAR_BUTTON 20
-
-#define WIDTH_SIDEBAR_BUTTON 40
-#define HEIGHT_SIDEBAR_BUTTON 40
-
-float         machine_position[MAX_N_AXIS];
-float         work_position[MAX_N_AXIS];
-bool          existSD = true, actualizarInterfaz = true;
-char          currentFilename[128];
-unsigned long jobStartTime        = 0;
-unsigned long totalPauseTime      = 0;  // Acumulador de tiempo perdido en pausas
-unsigned long pauseStartTimestamp = 0;  // Marca de tiempo de cuándo inició la pausa actual
-bool          isTimerPaused       = false;
+float                machine_position[MAX_N_AXIS];
+float                work_position[MAX_N_AXIS];
+bool                 existSD = true, actualizarInterfaz = true;
+char                 currentFilename[128];
+tft_ui::RuntimeState runtimeState;
 
 String selectedGCodeFile = "";  // Nombre del archivo G-code a confirmar
 bool   showConfirmDialog = false;
@@ -38,43 +28,33 @@ TFT_eSPI tft = TFT_eSPI();
 
 TaskHandle_t displayUpdateTaskHandle = NULL;
 // Estado de la interfaz
-enum UIState { UI_MENU, UI_HOME, UI_MEDIA, UI_CONTROL, UI_CONFIG, NO_CHANGE };
-UIState ui_state = UI_MENU;  // Estado inicial
-
-// Estructura botones
-struct TouchButton {
-    uint16_t    x1, y1, x2, y2;
-    const char* label;
-    const char* iconPath;
-    const char* iconPathActive;
-    uint16_t    color;
-};
-
-// Colores personalizados
-uint16_t color565(uint8_t r, uint8_t g, uint8_t b) {
-    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-}
-
-#define SIDEBAR_COLOR color565(0x18, 0x1B, 0x23)                // #181b23
-#define TOPBAR_COLOR color565(0x18, 0x1B, 0x23)                 // #080b16
-#define BG_COLOR color565(0x22, 0x25, 0x30)                     // #222530
-#define STATUS_BAR_COLOR color565(0x9f, 0xa7, 0xa8)             // #9fa7a8
-#define MAIN_BUTTON_COLOR color565(0x3d, 0x50, 0x93)            // #3d5093
-#define PROGRESS_BAR_BACKGROUND color565(0x88, 0x88, 0x88)      // #888888
-#define PROGRESS_BAR_FILL color565(0x69, 0xe3, 0xf3)            // #69e3f3
-#define CONTAINER_COORDS_COLOR color565(0x18, 0x1b, 0x23)       // #181b23
-#define CONTAINER_BORD_COORDS_COLOR color565(0x69, 0xe3, 0xf3)  // #69e3f3
+tft_ui::UIState     ui_state = tft_ui::UI_MENU;  // Estado inicial
+tft_ui::TouchReader touchReader;
 
 // Botones
-TouchButton buttons[] = {
-    { 8, 18, 33, 43, "Home", "/ui-icons/casa.jpg", "/ui-icons/casa-activo.jpg", SIDEBAR_COLOR },
-    { 8, 78, 33, 103, "Media", "/ui-icons/carpeta.jpg", "/ui-icons/carpeta-activo.jpg", SIDEBAR_COLOR },
-    { 8, 138, 33, 163, "Control", "/ui-icons/control.jpg", "/ui-icons/control-activo.jpg", SIDEBAR_COLOR },
-    { 8, 198, 33, 223, "Config", "/ui-icons/config.jpg", "/ui-icons/config-activo.jpg", SIDEBAR_COLOR },
-    { 265, 5, WIDTH_TOPBAR_BUTTON + 265, HEIGHT_TOPBAR_BUTTON + 5, "MicroSD", "/ui-icons/microSD.jpg", "/ui-icons/microSD.jpg", TOPBAR_COLOR },
-    { 290, 5, WIDTH_TOPBAR_BUTTON + 290, HEIGHT_TOPBAR_BUTTON + 5, "WiFi", "/ui-icons/wifi-no.jpg", "/ui-icons/wifi-ok.jpg", TOPBAR_COLOR },
-    { 218, 130, 243, 155, "Play-Pause", "/ui-main-icon/play.jpg", "/ui-main-icon/pause.jpg", MAIN_BUTTON_COLOR },
-    { 273, 130, 298, 155, "Stop", "/ui-main-icon/stop.jpg", "/ui-main-icon/stop.jpg", MAIN_BUTTON_COLOR },
+tft_ui::TouchButton buttons[] = {
+    { 8, 18, 33, 43, "Home", "/ui-icons/casa.jpg", "/ui-icons/casa-activo.jpg", tft_ui::SIDEBAR_COLOR },
+    { 8, 78, 33, 103, "Media", "/ui-icons/carpeta.jpg", "/ui-icons/carpeta-activo.jpg", tft_ui::SIDEBAR_COLOR },
+    { 8, 138, 33, 163, "Control", "/ui-icons/control.jpg", "/ui-icons/control-activo.jpg", tft_ui::SIDEBAR_COLOR },
+    { 8, 198, 33, 223, "Config", "/ui-icons/config.jpg", "/ui-icons/config-activo.jpg", tft_ui::SIDEBAR_COLOR },
+    { 265,
+      5,
+      tft_ui::WIDTH_TOPBAR_BUTTON + 265,
+      tft_ui::HEIGHT_TOPBAR_BUTTON + 5,
+      "MicroSD",
+      "/ui-icons/microSD.jpg",
+      "/ui-icons/microSD.jpg",
+      tft_ui::TOPBAR_COLOR },
+    { 290,
+      5,
+      tft_ui::WIDTH_TOPBAR_BUTTON + 290,
+      tft_ui::HEIGHT_TOPBAR_BUTTON + 5,
+      "WiFi",
+      "/ui-icons/wifi-no.jpg",
+      "/ui-icons/wifi-ok.jpg",
+      tft_ui::TOPBAR_COLOR },
+    { 218, 130, 243, 155, "Play-Pause", "/ui-main-icon/play.jpg", "/ui-main-icon/pause.jpg", tft_ui::MAIN_BUTTON_COLOR },
+    { 273, 130, 298, 155, "Stop", "/ui-main-icon/stop.jpg", "/ui-main-icon/stop.jpg", tft_ui::MAIN_BUTTON_COLOR },
 };
 const uint8_t NUM_BUTTONS = sizeof(buttons) / sizeof(buttons[0]);
 
@@ -109,7 +89,7 @@ void display_init() {
 
     if (cardType == CARD_NONE)
         existSD = false;
-    ui_state = UI_HOME;
+    ui_state = tft_ui::UI_HOME;
     // Crear la tarea de actualización de la UI
     xTaskCreatePinnedToCore(displayUpdate, "displayUpdateTask", 8192, NULL, 1, &displayUpdateTaskHandle, APP_CPU_NUM);
 }
@@ -224,14 +204,7 @@ void drawSdJpeg(const char* filename, int xpos, int ypos) {
 // ===============================================
 // Dibujar botones
 void ui_draw_button(int numButton, bool active) {
-    auto& b = buttons[numButton];
-    // dibuja el rectángulo del boton
-    tft.fillRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, b.color);
-    if (active) {
-        drawSdJpeg(b.iconPathActive, b.x1, b.y1);
-    } else {
-        drawSdJpeg(b.iconPath, b.x1, b.y1);
-    }
+    tft_ui::draw_button(tft, buttons[numButton], active, drawSdJpeg);
 }
 
 // Detectar touch botones
@@ -296,16 +269,7 @@ void ui_update_wifi_icon() {
 }
 
 void ui_draw_menu(const char* title) {
-    tft.fillScreen(BG_COLOR);
-    //Topbar
-    tft.fillRect(40, 0, WIDTH_TOPBAR, HEIGHT_TOPBAR, TOPBAR_COLOR);
-    tft.setTextSize(1);
-    tft.setTextColor(TFT_WHITE, TOPBAR_COLOR);
-    tft.setTextDatum(MC_DATUM);  // Middle-Center
-    tft.drawString(title, tft.width() / 2, HEIGHT_TOPBAR / 2);
-    // Sidebar
-    tft.fillRect(0, 0, WIDTH_SIDEBAR, HEIGHT_SIDEBAR, SIDEBAR_COLOR);
-
+    tft_ui::draw_menu_shell(tft, title);
     ui_draw_button(4, true);  // MicroSD Icon
     ui_update_wifi_icon();
 }
@@ -321,37 +285,37 @@ void ui_show_work() {
     ui_draw_button(2, false);  // Control Icon
     ui_draw_button(3, false);  // Config Icon
     // Estado
-    tft.fillRect(45, 41, 150, 33, STATUS_BAR_COLOR);
+    tft.fillRect(45, 41, 150, 33, tft_ui::STATUS_BAR_COLOR);
     // Coords containers
     // X
-    tft.fillRect(45, 85, 150, 20, CONTAINER_COORDS_COLOR);
-    tft.drawRect(45, 85, 150, 20, CONTAINER_BORD_COORDS_COLOR);
+    tft.fillRect(45, 85, 150, 20, tft_ui::CONTAINER_COORDS_COLOR);
+    tft.drawRect(45, 85, 150, 20, tft_ui::CONTAINER_BORD_COORDS_COLOR);
     // Y
-    tft.fillRect(45, 120, 150, 20, CONTAINER_COORDS_COLOR);
-    tft.drawRect(45, 120, 150, 20, CONTAINER_BORD_COORDS_COLOR);
+    tft.fillRect(45, 120, 150, 20, tft_ui::CONTAINER_COORDS_COLOR);
+    tft.drawRect(45, 120, 150, 20, tft_ui::CONTAINER_BORD_COORDS_COLOR);
     // Z
-    tft.fillRect(45, 155, 150, 20, CONTAINER_COORDS_COLOR);
-    tft.drawRect(45, 155, 150, 20, CONTAINER_BORD_COORDS_COLOR);
+    tft.fillRect(45, 155, 150, 20, tft_ui::CONTAINER_COORDS_COLOR);
+    tft.drawRect(45, 155, 150, 20, tft_ui::CONTAINER_BORD_COORDS_COLOR);
     // Progress Bar
-    tft.fillRoundRect(55, 195, 250, 15, 7, PROGRESS_BAR_BACKGROUND);
+    tft.fillRoundRect(55, 195, 250, 15, 7, tft_ui::PROGRESS_BAR_BACKGROUND);
     // Relleno Progress Bar
-    tft.fillRoundRect(55, 195, 0, 15, 7, PROGRESS_BAR_FILL);
+    tft.fillRoundRect(55, 195, 0, 15, 7, tft_ui::PROGRESS_BAR_FILL);
 
     // Panel control
-    tft.fillRect(205, 65, 50, 50, MAIN_BUTTON_COLOR);   // Temperatura
-    tft.fillRect(260, 65, 50, 50, MAIN_BUTTON_COLOR);   // Ventilador
-    tft.fillRect(205, 125, 50, 50, MAIN_BUTTON_COLOR);  // Play / Pause
-    tft.fillRect(260, 125, 50, 50, MAIN_BUTTON_COLOR);  // Stop
+    tft.fillRect(205, 65, 50, 50, tft_ui::MAIN_BUTTON_COLOR);   // Temperatura
+    tft.fillRect(260, 65, 50, 50, tft_ui::MAIN_BUTTON_COLOR);   // Ventilador
+    tft.fillRect(205, 125, 50, 50, tft_ui::MAIN_BUTTON_COLOR);  // Play / Pause
+    tft.fillRect(260, 125, 50, 50, tft_ui::MAIN_BUTTON_COLOR);  // Stop
 
     // Textos Iniciales
     // Estado
     tft.setTextDatum(MC_DATUM);
-    tft.setTextColor(TFT_BLACK, STATUS_BAR_COLOR);
+    tft.setTextColor(TFT_BLACK, tft_ui::STATUS_BAR_COLOR);
     tft.setTextSize(2);
     tft.drawString("DESCONECTADO", 121, 58);
     // Coordenadas
     tft.setTextDatum(ML_DATUM);
-    tft.setTextColor(CONTAINER_BORD_COORDS_COLOR, CONTAINER_COORDS_COLOR);
+    tft.setTextColor(tft_ui::CONTAINER_BORD_COORDS_COLOR, tft_ui::CONTAINER_COORDS_COLOR);
     tft.setTextSize(1);
     tft.drawString("X", 50, 95);
     tft.setTextDatum(MR_DATUM);
@@ -369,7 +333,7 @@ void ui_show_work() {
 
     // Progress Bar
     tft.setTextDatum(ML_DATUM);
-    tft.setTextColor(PROGRESS_BAR_FILL, TFT_BLACK);
+    tft.setTextColor(tft_ui::PROGRESS_BAR_FILL, TFT_BLACK);
     tft.drawString("0%", 60, 220);
 
     tft.setTextDatum(MR_DATUM);
@@ -383,7 +347,7 @@ void ui_show_work() {
     tft.drawString("SD CARD", 257, 51);
 
     // Tarjetas Info maquina
-    tft.setTextColor(TFT_WHITE, MAIN_BUTTON_COLOR);
+    tft.setTextColor(TFT_WHITE, tft_ui::MAIN_BUTTON_COLOR);
     drawSdJpeg("/ui-main-icon/temperatura.jpg", 218, 72);
     tft.drawString("0%", 230, 105);
     drawSdJpeg("/ui-main-icon/ventilador.jpg", 273, 72);
@@ -395,14 +359,7 @@ void ui_show_work() {
 }
 
 void ui_draw_ctrl_btn(int x, int y, int w, int h, const char* label) {
-    tft.fillRect(x, y, w, h, CONTAINER_COORDS_COLOR);
-    tft.drawRect(x, y, w, h, CONTAINER_BORD_COORDS_COLOR);
-
-    tft.setTextSize(1);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextColor(CONTAINER_BORD_COORDS_COLOR, CONTAINER_COORDS_COLOR);
-    
-    tft.drawString(label, x + (w / 2), y + (h / 2));
+    tft_ui::draw_ctrl_btn(tft, x, y, w, h, label);
 }
 
 void ui_show_control() {
@@ -411,22 +368,22 @@ void ui_show_control() {
     ui_draw_button(1, false);  // Folder Icon
     ui_draw_button(2, true);   // Control Icon
     ui_draw_button(3, false);  // Config Icon
-    
+
     // Visualizar Coordenadas
     // Contenedores
     // X
-    tft.fillRect(48, 40, 84, 20, CONTAINER_COORDS_COLOR);
-    tft.drawRect(48, 40, 84, 20, CONTAINER_BORD_COORDS_COLOR);
+    tft.fillRect(48, 40, 84, 20, tft_ui::CONTAINER_COORDS_COLOR);
+    tft.drawRect(48, 40, 84, 20, tft_ui::CONTAINER_BORD_COORDS_COLOR);
     // Y
-    tft.fillRect(138, 40, 84, 20, CONTAINER_COORDS_COLOR);
-    tft.drawRect(138, 40, 84, 20, CONTAINER_BORD_COORDS_COLOR);
+    tft.fillRect(138, 40, 84, 20, tft_ui::CONTAINER_COORDS_COLOR);
+    tft.drawRect(138, 40, 84, 20, tft_ui::CONTAINER_BORD_COORDS_COLOR);
     // Z
-    tft.fillRect(228, 40, 84, 20, CONTAINER_COORDS_COLOR);
-    tft.drawRect(228, 40, 84, 20, CONTAINER_BORD_COORDS_COLOR);
+    tft.fillRect(228, 40, 84, 20, tft_ui::CONTAINER_COORDS_COLOR);
+    tft.drawRect(228, 40, 84, 20, tft_ui::CONTAINER_BORD_COORDS_COLOR);
     // Valores
     // X
     tft.setTextDatum(ML_DATUM);
-    tft.setTextColor(CONTAINER_BORD_COORDS_COLOR, CONTAINER_COORDS_COLOR);
+    tft.setTextColor(tft_ui::CONTAINER_BORD_COORDS_COLOR, tft_ui::CONTAINER_COORDS_COLOR);
     tft.setTextSize(1);
     tft.drawString("X", 53, 50);
     tft.setTextDatum(MR_DATUM);
@@ -442,22 +399,22 @@ void ui_show_control() {
     tft.setTextDatum(MR_DATUM);
     tft.drawString("0.000", 310, 50);
     // Botones de control JOG
-    int w = 50; 
+    int w = 50;
     int h = 50;
     ui_draw_ctrl_btn(55, 75, w, h, "X- Y+");   // Diagonal Izq-Arr
     ui_draw_ctrl_btn(105, 75, w, h, "Y+");     // Arriba
     ui_draw_ctrl_btn(155, 75, w, h, "X+ Y+");  // Diagonal Der-Arr
-    
+
     // FILA MEDIA (X)
     ui_draw_ctrl_btn(55, 125, w, h, "X-");     // Izquierda
     ui_draw_ctrl_btn(105, 125, w, h, "ZERO");  // Centro (Reset Zero)
     ui_draw_ctrl_btn(155, 125, w, h, "X+");    // Derecha
-    
+
     // FILA INFERIOR (Y-)
-    ui_draw_ctrl_btn(55, 175, w, h, "X- Y-");  // Diagonal Izq-Abj
-    ui_draw_ctrl_btn(105, 175, w, h, "Y-");    // Abajo
-    ui_draw_ctrl_btn(155, 175, w, h, "X+ Y-"); // Diagonal Der-Abj
-    
+    ui_draw_ctrl_btn(55, 175, w, h, "X- Y-");   // Diagonal Izq-Abj
+    ui_draw_ctrl_btn(105, 175, w, h, "Y-");     // Abajo
+    ui_draw_ctrl_btn(155, 175, w, h, "X+ Y-");  // Diagonal Der-Abj
+
     // COLUMNA Z (Derecha)
     ui_draw_ctrl_btn(245, 75, w, h, "Z+");     // Subir Z
     ui_draw_ctrl_btn(245, 125, w, h, "HOME");  // Ir a Casa (Go To Zero)
@@ -521,14 +478,14 @@ void ui_toggle_pause_resume() {
 
     // CASO 1: La máquina se está moviendo (Ciclo, Home o Jog) -> PAUSAR
     if (sys.state == State::Cycle || sys.state == State::Homing || sys.state == State::Jog) {
-        execute_realtime_command(Cmd::FeedHold, CLIENT_SERIAL);
+        tft_ui::Core::toggle_pause_resume();
 
         // Feedback visual forzado para debug
         tft.fillCircle(230, 140, 10, TFT_ORANGE);  // Pequeño punto naranja indicador
     }
     // CASO 2: La máquina está en espera (Hold) -> REANUDAR
     else if (sys.state == State::Hold) {
-        execute_realtime_command(Cmd::CycleStart, CLIENT_SERIAL);
+        tft_ui::Core::toggle_pause_resume();
 
         // Feedback visual forzado
         tft.fillCircle(230, 140, 10, TFT_GREEN);  // Pequeño punto verde indicador
@@ -536,36 +493,20 @@ void ui_toggle_pause_resume() {
 }
 
 void ui_stop_job() {
-    closeFile();
-    execute_realtime_command(Cmd::Reset, CLIENT_SERIAL);
-    delay(500);
-    // Forzamos un refresco (true) para que Grbl ejecute SD.begin() de nuevo
-    // y la tarjeta vuelva a estar disponible para el explorador de archivos.
-    if (get_sd_state(true) == SDState::Idle) {
-        existSD = true;
-    } else {
-        existSD = false;  // Si falla, marcamos que no hay SD
-    }
+    tft_ui::Manager::on_stop_requested(existSD);
 
-    ui_state = UI_HOME;
-    tft.fillScreen(BG_COLOR);
+    ui_state = tft_ui::UI_HOME;
+    tft.fillScreen(tft_ui::BG_COLOR);
     tft.setTextColor(TFT_WHITE);
     tft.drawCentreString("CANCELADO", tft.width() / 2, tft.height() / 2, 4);
     delay(1000);
-    tft.fillScreen(BG_COLOR);
+    tft.fillScreen(tft_ui::BG_COLOR);
     ui_show_home();
 }
 
 bool ui_start_selected_file() {
     if (selectedGCodeFile.length() > 0) {
-        // Formato: "$SD/Run=<ruta_del_archivo>"
-        // Ejemplo: "$SD/Run=/carpeta/diseño.gcode"
-        String command = "$SD/Run=" + selectedGCodeFile;
-
-        // Enviar el comando al sistema como si fuera un admin escribiendo en consola
-        // Usamos CLIENT_SERIAL
-        Error err = system_execute_line((char*)command.c_str(), (uint8_t)CLIENT_SERIAL, WebUI::AuthenticationLevel::LEVEL_ADMIN);
-        if (err != Error::Ok) {
+        if (!tft_ui::Core::start_sd_job(selectedGCodeFile)) {
             // Manejar error (archivo no encontrado o sistema ocupado)
             return false;
         } else {
@@ -574,6 +515,7 @@ bool ui_start_selected_file() {
             return true;
         }
     }
+    return false;
 }
 
 // Configuración de JOG
@@ -581,82 +523,67 @@ float jog_dist = 10.0;  // Distancia por defecto (mm)
 int   jog_feed = 2000;  // Velocidad de movimiento (mm/min)
 // Enviar comando de movimiento incremental ($J)
 void ui_send_jog(float x, float y, float z) {
-    if (sys.state != State::Idle && sys.state != State::Jog) return;
-    char cmd[64];
-    sprintf(cmd, "$J=G91 G21 X%.3f Y%.3f Z%.3f F%d", x, y, z, jog_feed);
-    system_execute_line(cmd, (uint8_t)CLIENT_SERIAL, WebUI::AuthenticationLevel::LEVEL_ADMIN);
+    tft_ui::Core::send_jog(x, y, z, jog_feed);
 }
 
 // Establecer el Cero de Trabajo actual (Reset Zero)
 void ui_set_zero_all() {
-    char cmd[] = "G10 P0 L20 X0 Y0 Z0"; 
-    system_execute_line(cmd, (uint8_t)CLIENT_SERIAL, WebUI::AuthenticationLevel::LEVEL_ADMIN);
+    tft_ui::Core::set_zero_all();
 }
 
 // Mover la máquina al origen (Go To Zero)
 void ui_go_to_zero() {
-    // G90: Coordenadas Absolutas
-    // G0: Movimiento Rápido
-    // X0 Y0: Ir al origen (Z se suele omitir o mover al final por seguridad)
-    
-    // 1. Primero levantar Z un poco por seguridad
-    //system_execute_line("$J=G91 Z5 F500", ...); 
-    
-    // 2. Ir al origen XY
-    char cmd[] = "G90 G0 X0 Y0";
-    system_execute_line(cmd, (uint8_t)CLIENT_SERIAL, WebUI::AuthenticationLevel::LEVEL_ADMIN);
-    
-    // 3. Bajar Z a 0 (Opcional, descomentar si quieres que baje también)
-    // char cmdZ[] = "G90 G0 Z0";
-    // system_execute_line(cmdZ, CLIENT_SERIAL, WebUI::AuthenticationLevel::LEVEL_ADMIN);
+    tft_ui::Core::run_home_cycle();
 }
 
 void ui_handle_control_touch(uint16_t tx, uint16_t ty) {
-    
     // --- DEFINICIÓN DE LA CUADRÍCULA ---
     // X inicio: 55, Ancho celda: 50
     // Y inicio: 75, Alto celda: 50
-    
+
     // ZONA XY (Cuadrícula 3x3)
     // Rango X: 55 a 205 (55 + 50*3)
     // Rango Y: 75 a 225 (75 + 50*3)
-    
+
     if (tx >= 55 && tx <= 205 && ty >= 75 && ty <= 225) {
-        
         // Calcular columna (0, 1, 2) y fila (0, 1, 2)
         int col = (tx - 55) / 50;
         int row = (ty - 75) / 50;
-        
+
         float moveX = 0;
         float moveY = 0;
 
         // --- Lógica de Dirección XY ---
-        
+
         // FILA 0 (Superior): Y+
-        if (row == 0) moveY = jog_dist;
-        
+        if (row == 0)
+            moveY = jog_dist;
+
         // FILA 2 (Inferior): Y-
-        if (row == 2) moveY = -jog_dist;
-        
+        if (row == 2)
+            moveY = -jog_dist;
+
         // COLUMNA 0 (Izquierda): X-
-        if (col == 0) moveX = -jog_dist;
-        
+        if (col == 0)
+            moveX = -jog_dist;
+
         // COLUMNA 2 (Derecha): X+
-        if (col == 2) moveX = jog_dist;
+        if (col == 2)
+            moveX = jog_dist;
 
         // --- Ejecución ---
-        
+
         // Si es el CENTRO (Col 1, Row 1) -> RESET ZERO
         if (col == 1 && row == 1) {
-            ui_set_zero_all(); // Llama a tu función G10 L20...
-            delay(200); 
+            ui_set_zero_all();  // Llama a tu función G10 L20...
+            delay(200);
             return;
         }
-        
+
         // Si hay movimiento (Diagonales o Rectos)
         if (moveX != 0 || moveY != 0) {
-            ui_send_jog(moveX, moveY, 0); // Mover solo XY
-            delay(100); // Anti-rebote
+            ui_send_jog(moveX, moveY, 0);  // Mover solo XY
+            delay(100);                    // Anti-rebote
         }
         return;
     }
@@ -664,23 +591,22 @@ void ui_handle_control_touch(uint16_t tx, uint16_t ty) {
     // 2. ZONA Z y HOME (Columna derecha)
     // X: 245 a 295 (50px ancho)
     // Y: 75 a 225 (3 botones de 50px alto)
-    
+
     if (tx >= 245 && tx <= 295 && ty >= 75 && ty <= 225) {
-        
-        int zRow = (ty - 75) / 50; // 0=Arriba, 1=Medio, 2=Abajo
-        
+        int zRow = (ty - 75) / 50;  // 0=Arriba, 1=Medio, 2=Abajo
+
         // Botón Superior (75-125): Z+
         if (zRow == 0) {
             ui_send_jog(0, 0, jog_dist);
             delay(100);
         }
-        
+
         // Botón Medio (125-175): RETURN HOME
         else if (zRow == 1) {
-            ui_go_to_zero(); // Llama a tu función G90 G0 X0 Y0
+            ui_go_to_zero();  // Llama a tu función G90 G0 X0 Y0
             delay(200);
         }
-        
+
         // Botón Inferior (175-225): Z-
         else if (zRow == 2) {
             ui_send_jog(0, 0, -jog_dist);
@@ -688,12 +614,12 @@ void ui_handle_control_touch(uint16_t tx, uint16_t ty) {
         }
         return;
     }
-    
+
     // 3. CONTROL DE VALORES DRO (Opcional: Setear cero individualmente)
     // Si tocan los contenedores de coordenadas superiores para hacer cero un solo eje
     // X Container: 48, 40, 84, 20
     if (tx >= 48 && tx <= 132 && ty >= 40 && ty <= 60) {
-        char cmd[] = "G10 P0 L20 X0"; // Buffer local
+        char cmd[] = "G10 P0 L20 X0";  // Buffer local
         system_execute_line(cmd, (uint8_t)CLIENT_SERIAL, WebUI::AuthenticationLevel::LEVEL_ADMIN);
         // ... feedback ...
     }
@@ -711,15 +637,13 @@ void ui_handle_control_touch(uint16_t tx, uint16_t ty) {
     }
 }
 
-
-
 void loopWork() {
     // Actualizar estado maquina
     switch (sys.state) {
         case State::Idle:
-            tft.fillRect(45, 41, 150, 33, STATUS_BAR_COLOR);  // Limpiar Contenedor
+            tft.fillRect(45, 41, 150, 33, tft_ui::STATUS_BAR_COLOR);  // Limpiar Contenedor
             tft.setTextDatum(MC_DATUM);
-            tft.setTextColor(TFT_BLACK, STATUS_BAR_COLOR);
+            tft.setTextColor(TFT_BLACK, tft_ui::STATUS_BAR_COLOR);
             tft.setTextSize(2);
             tft.drawString("IDLE", 121, 58);
             tft.setTextSize(1);
@@ -733,17 +657,17 @@ void loopWork() {
             tft.setTextSize(1);
             break;
         case State::CheckMode:
-            tft.fillRect(45, 41, 150, 33, STATUS_BAR_COLOR);  // Limpiar Contenedor
+            tft.fillRect(45, 41, 150, 33, tft_ui::STATUS_BAR_COLOR);  // Limpiar Contenedor
             tft.setTextDatum(MC_DATUM);
-            tft.setTextColor(TFT_BLACK, STATUS_BAR_COLOR);
+            tft.setTextColor(TFT_BLACK, tft_ui::STATUS_BAR_COLOR);
             tft.setTextSize(2);
             tft.drawString("CHECKMODE", 121, 58);
             tft.setTextSize(1);
             break;
         case State::Homing:
-            tft.fillRect(45, 41, 150, 33, STATUS_BAR_COLOR);  // Limpiar Contenedor
+            tft.fillRect(45, 41, 150, 33, tft_ui::STATUS_BAR_COLOR);  // Limpiar Contenedor
             tft.setTextDatum(MC_DATUM);
-            tft.setTextColor(TFT_BLACK, STATUS_BAR_COLOR);
+            tft.setTextColor(TFT_BLACK, tft_ui::STATUS_BAR_COLOR);
             tft.setTextSize(2);
             tft.drawString("HOMING", 121, 58);
             tft.setTextSize(1);
@@ -773,17 +697,17 @@ void loopWork() {
             tft.setTextSize(1);
             break;
         case State::SafetyDoor:
-            tft.fillRect(45, 41, 150, 33, STATUS_BAR_COLOR);  // Limpiar Contenedor
+            tft.fillRect(45, 41, 150, 33, tft_ui::STATUS_BAR_COLOR);  // Limpiar Contenedor
             tft.setTextDatum(MC_DATUM);
-            tft.setTextColor(TFT_BLACK, STATUS_BAR_COLOR);
+            tft.setTextColor(TFT_BLACK, tft_ui::STATUS_BAR_COLOR);
             tft.setTextSize(2);
             tft.drawString("SAFETYDOOR", 121, 58);
             tft.setTextSize(1);
             break;
         case State::Sleep:
-            tft.fillRect(45, 41, 150, 33, STATUS_BAR_COLOR);  // Limpiar Contenedor
+            tft.fillRect(45, 41, 150, 33, tft_ui::STATUS_BAR_COLOR);  // Limpiar Contenedor
             tft.setTextDatum(MC_DATUM);
-            tft.setTextColor(TFT_BLACK, STATUS_BAR_COLOR);
+            tft.setTextColor(TFT_BLACK, tft_ui::STATUS_BAR_COLOR);
             tft.setTextSize(2);
             tft.drawString("SLEEP", 121, 58);
             tft.setTextSize(1);
@@ -815,24 +739,24 @@ void loopWork() {
     float w_z = mpos[Z_AXIS] - wco[Z_AXIS];
     // Coords containers
     // X
-    tft.fillRect(45, 85, 150, 20, CONTAINER_COORDS_COLOR);
-    tft.drawRect(45, 85, 150, 20, CONTAINER_BORD_COORDS_COLOR);
+    tft.fillRect(45, 85, 150, 20, tft_ui::CONTAINER_COORDS_COLOR);
+    tft.drawRect(45, 85, 150, 20, tft_ui::CONTAINER_BORD_COORDS_COLOR);
     tft.setTextDatum(ML_DATUM);
-    tft.setTextColor(CONTAINER_BORD_COORDS_COLOR, CONTAINER_COORDS_COLOR);
+    tft.setTextColor(tft_ui::CONTAINER_BORD_COORDS_COLOR, tft_ui::CONTAINER_COORDS_COLOR);
     tft.setTextSize(1);
     tft.drawString("X", 50, 95);
     tft.setTextDatum(MR_DATUM);
     tft.drawFloat(w_x, 3, 190, 95);
     // Y
-    tft.fillRect(45, 120, 150, 20, CONTAINER_COORDS_COLOR);
-    tft.drawRect(45, 120, 150, 20, CONTAINER_BORD_COORDS_COLOR);
+    tft.fillRect(45, 120, 150, 20, tft_ui::CONTAINER_COORDS_COLOR);
+    tft.drawRect(45, 120, 150, 20, tft_ui::CONTAINER_BORD_COORDS_COLOR);
     tft.setTextDatum(ML_DATUM);
     tft.drawString("Y", 50, 130);
     tft.setTextDatum(MR_DATUM);
     tft.drawFloat(w_y, 3, 190, 130);
     // Z
-    tft.fillRect(45, 155, 150, 20, CONTAINER_COORDS_COLOR);
-    tft.drawRect(45, 155, 150, 20, CONTAINER_BORD_COORDS_COLOR);
+    tft.fillRect(45, 155, 150, 20, tft_ui::CONTAINER_COORDS_COLOR);
+    tft.drawRect(45, 155, 150, 20, tft_ui::CONTAINER_BORD_COORDS_COLOR);
     tft.setTextDatum(ML_DATUM);
     tft.drawString("Z", 50, 165);
     tft.setTextDatum(MR_DATUM);
@@ -852,12 +776,12 @@ void loopWork() {
         int barWidth = (int)(250.0f * (percentage / 100.0f));
 
         // Dibujar solo si cambia para evitar parpadeo excesivo
-        tft.fillRoundRect(55, 195, barWidth, 15, 7, PROGRESS_BAR_FILL);
+        tft.fillRoundRect(55, 195, barWidth, 15, 7, tft_ui::PROGRESS_BAR_FILL);
 
         // Texto de porcentaje
         tft.setTextSize(1);
         tft.setTextDatum(ML_DATUM);
-        tft.setTextColor(PROGRESS_BAR_FILL, TFT_BLACK);
+        tft.setTextColor(tft_ui::PROGRESS_BAR_FILL, TFT_BLACK);
         String percStr = String((int)percentage) + "%";
         tft.drawString(percStr, 60, 220);
 
@@ -866,30 +790,29 @@ void loopWork() {
 
         // Detectar si entramos en PAUSA (Hold)
         if (sys.state == State::Hold) {
-            if (!isTimerPaused) {
+            if (!runtimeState.timer_paused) {
                 // Acabamos de entrar en pausa, guardamos el momento exacto
-                pauseStartTimestamp = currentMillis;
-                isTimerPaused       = true;
+                runtimeState.pause_start_timestamp = currentMillis;
+                runtimeState.timer_paused          = true;
             }
         }
         // Detectar si salimos de PAUSA (Reanudamos)
         else {
-            if (isTimerPaused) {
+            if (runtimeState.timer_paused) {
                 // Acabamos de reanudar, sumamos lo que duró la pausa al acumulador
-                totalPauseTime += (currentMillis - pauseStartTimestamp);
-                isTimerPaused = false;
+                runtimeState.total_pause_time += (currentMillis - runtimeState.pause_start_timestamp);
+                runtimeState.timer_paused = false;
             }
         }
-
         // Calcular Tiempo Efectivo (Tiempo real - Pausas)
         unsigned long elapsedMillis;
 
-        if (isTimerPaused) {
+        if (runtimeState.timer_paused) {
             // Si está pausado, congelamos el tiempo visual en el momento que pausó
-            elapsedMillis = pauseStartTimestamp - jobStartTime - totalPauseTime;
+            elapsedMillis = runtimeState.pause_start_timestamp - runtimeState.job_start_time - runtimeState.total_pause_time;
         } else {
             // Si está corriendo, es el tiempo actual menos el inicio y las pausas previas
-            elapsedMillis = currentMillis - jobStartTime - totalPauseTime;
+            elapsedMillis = currentMillis - runtimeState.job_start_time - runtimeState.total_pause_time;
         }
 
         unsigned long elapsedSecs   = elapsedMillis / 1000;
@@ -917,11 +840,10 @@ void loopWork() {
 
         static float lastPower = -1.0;
         static float lastS     = -1.0;
-
         if (abs(laserPower - lastPower) > 0.5 || currentS != lastS) {
             // Texto Porcentaje
             tft.setTextDatum(MC_DATUM);
-            tft.setTextColor(TFT_WHITE, MAIN_BUTTON_COLOR);
+            tft.setTextColor(TFT_WHITE, tft_ui::MAIN_BUTTON_COLOR);
             tft.drawString(String((int)laserPower) + "%", 230, 105);
             // Actualizar estado previo
             lastPower = laserPower;
@@ -934,13 +856,13 @@ void loopWork() {
 
     if (sys.state == State::Hold) {
         if (lastStateDraw != State::Hold) {
-            tft.fillRect(btnX, btnY, 50, 50, MAIN_BUTTON_COLOR);
+            tft.fillRect(btnX, btnY, 50, 50, tft_ui::MAIN_BUTTON_COLOR);
 
             ui_draw_button(6, false);
 
             tft.setTextDatum(MC_DATUM);
-            tft.setTextColor(TFT_WHITE, MAIN_BUTTON_COLOR);
-            tft.fillRect(205, 160, 40, 10, MAIN_BUTTON_COLOR);  // Limpiar texto previo
+            tft.setTextColor(TFT_WHITE, tft_ui::MAIN_BUTTON_COLOR);
+            tft.fillRect(205, 160, 40, 10, tft_ui::MAIN_BUTTON_COLOR);
             tft.drawString("Reanudar", 230, 165);
 
             lastStateDraw = State::Hold;  // Actualizar estado dibujado
@@ -954,12 +876,12 @@ void loopWork() {
         // Comparamos contra el último estado dibujado específico
         // Si lo último dibujado NO fue "Movimiento", redibujamos a Pausa
         if (lastStateDraw == State::Hold || lastStateDraw == State::Idle) {
-            tft.fillRect(btnX, btnY, 50, 50, MAIN_BUTTON_COLOR);
+            tft.fillRect(btnX, btnY, 50, 50, tft_ui::MAIN_BUTTON_COLOR);
             ui_draw_button(6, true);
 
             tft.setTextDatum(MC_DATUM);
-            tft.setTextColor(TFT_WHITE, MAIN_BUTTON_COLOR);
-            tft.fillRect(205, 160, 40, 10, MAIN_BUTTON_COLOR);  // Limpiar texto previo
+            tft.setTextColor(TFT_WHITE, tft_ui::MAIN_BUTTON_COLOR);
+            tft.fillRect(205, 160, 40, 10, tft_ui::MAIN_BUTTON_COLOR);  // Limpiar texto previo
             tft.drawString("Pausa", 230, 165);
 
             lastStateDraw = State::Cycle;  // Marcamos como "en movimiento"
@@ -977,11 +899,11 @@ void loopHome() {
     }
 }
 
-void loopJOG(){
+void loopJOG(const tft_ui::TouchEvent& touch) {
     // 1. Obtener posición actual
     float* mpos = system_get_mpos();
-    float* wco = get_wco();
-    
+    float* wco  = get_wco();
+
     // Calcular posición de trabajo (Work Position)
     float w_x = mpos[X_AXIS] - wco[X_AXIS];
     float w_y = mpos[Y_AXIS] - wco[Y_AXIS];
@@ -989,30 +911,24 @@ void loopJOG(){
 
     // 2. Actualizar valores en pantalla (Solo los números)
     tft.setTextSize(1);
-    tft.setTextColor(CONTAINER_BORD_COORDS_COLOR, CONTAINER_COORDS_COLOR);
-    
+    tft.setTextColor(tft_ui::CONTAINER_BORD_COORDS_COLOR, tft_ui::CONTAINER_COORDS_COLOR);
+
     // Usamos fillRect para limpiar solo el área del número antes de escribir
     // X
     tft.setTextDatum(MR_DATUM);
-    tft.fillRect(80, 42, 50, 16, CONTAINER_COORDS_COLOR); 
+    tft.fillRect(80, 42, 50, 16, tft_ui::CONTAINER_COORDS_COLOR);
     tft.drawFloat(w_x, 3, 130, 50);
-    
+
     // Y
-    tft.fillRect(170, 42, 50, 16, CONTAINER_COORDS_COLOR);
+    tft.fillRect(170, 42, 50, 16, tft_ui::CONTAINER_COORDS_COLOR);
     tft.drawFloat(w_y, 3, 220, 50);
-    
+
     // Z
-    tft.fillRect(260, 42, 50, 16, CONTAINER_COORDS_COLOR);
+    tft.fillRect(260, 42, 50, 16, tft_ui::CONTAINER_COORDS_COLOR);
     tft.drawFloat(w_z, 3, 310, 50);
 
-    uint16_t tx, ty;
-    bool     pressed = tft.getTouch(&tx, &ty);
-    // Invertiri el eje Y del touch a la esquina izquierda superior
-    // Debido que al imprimir y dibujar en la pantalla ese es el punto 0,0
-    // Sin embargo al obtener el touch no lo es.
-    if (pressed) {
-        ty      = tft.height() - ty;
-        ui_handle_control_touch(tx, ty);
+    if (touch.pressed) {
+        ui_handle_control_touch(touch.x, touch.y);
     }
 }
 
@@ -1106,10 +1022,10 @@ void ui_show_media() {
     ui_draw_button(3, false);  // Config Icon
     tft.setTextDatum(MC_DATUM);
     tft.setTextColor(TFT_WHITE);
-    tft.fillRect(40, 30, 280, 210, BG_COLOR);
+    tft.fillRect(40, 30, 280, 210, tft_ui::BG_COLOR);
 
     tft.setTextSize(1);
-    tft.setTextColor(TFT_WHITE, BG_COLOR);
+    tft.setTextColor(TFT_WHITE, tft_ui::BG_COLOR);
     tft.setTextDatum(TL_DATUM);
 
     uint8_t maxLines = 8;
@@ -1140,7 +1056,7 @@ void ui_show_media() {
         tft.drawString(fileList[idx].name, 80, y + 5);
     }
 
-    tft.fillRect(280, 40, 50, 200, BG_COLOR);
+    tft.fillRect(280, 40, 50, 200, tft_ui::BG_COLOR);
     // Flecha arriba
     if (scrollIndex > 0) {
         // Contenedor flechas
@@ -1157,30 +1073,30 @@ void ui_draw_confirm_dialog() {
         return;
 
     // 1. Dibujar el fondo del diálogo (Ejemplo: gris claro con borde)
-    tft.fillRect(DIALOG_X, DIALOG_Y, DIALOG_W, DIALOG_H, BG_COLOR);
+    tft.fillRect(DIALOG_X, DIALOG_Y, DIALOG_W, DIALOG_H, tft_ui::BG_COLOR);
     tft.drawRect(DIALOG_X, DIALOG_Y, DIALOG_W, DIALOG_H, TFT_WHITE);
 
     // 2. Título / Mensaje
     tft.setTextDatum(MC_DATUM);  // Centro Medio
     tft.setTextSize(1);
-    tft.setTextColor(TFT_WHITE, BG_COLOR);
+    tft.setTextColor(TFT_WHITE, tft_ui::BG_COLOR);
 
     // Primera línea de texto
     tft.drawString("Iniciar trabajo?", DIALOG_X + DIALOG_W / 2, DIALOG_Y + 25);
 
     // Nombre del archivo (en una fuente o color diferente)
-    tft.setTextColor(TFT_BLUE, BG_COLOR);
+    tft.setTextColor(TFT_BLUE, tft_ui::BG_COLOR);
     tft.drawString(selectedGCodeFile, DIALOG_X + DIALOG_W / 2, DIALOG_Y + 50);
 
     // 3. Botón "SÍ" (Iniciar)
     int btnY = DIALOG_Y + 100;
-    tft.fillRect(DIALOG_X + 20, btnY, 80, 40, PROGRESS_BAR_FILL);
-    tft.setTextColor(TFT_WHITE, PROGRESS_BAR_FILL);
+    tft.fillRect(DIALOG_X + 20, btnY, 80, 40, tft_ui::PROGRESS_BAR_FILL);
+    tft.setTextColor(TFT_WHITE, tft_ui::PROGRESS_BAR_FILL);
     tft.drawString("Si", DIALOG_X + 20 + 40, btnY + 20);
 
     // 4. Botón "NO" (Cancelar)
-    tft.fillRect(DIALOG_X + 120, btnY, 80, 40, MAIN_BUTTON_COLOR);
-    tft.setTextColor(TFT_WHITE, MAIN_BUTTON_COLOR);
+    tft.fillRect(DIALOG_X + 120, btnY, 80, 40, tft_ui::MAIN_BUTTON_COLOR);
+    tft.setTextColor(TFT_WHITE, tft_ui::MAIN_BUTTON_COLOR);
     tft.drawString("No", DIALOG_X + 120 + 40, btnY + 20);
 }
 
@@ -1259,7 +1175,7 @@ void ui_handle_dialog_touch(uint16_t tx, uint16_t ty) {
             // - myFile = archivo abierto
             // - sd_state = SDState::BusyPrinting
             // - sd_current_line_number = 0
-            ui_state = UI_HOME;
+            ui_state = tft_ui::UI_HOME;
             ui_show_work();
         } else {
             showConfirmDialog = false;
@@ -1277,15 +1193,12 @@ void ui_handle_dialog_touch(uint16_t tx, uint16_t ty) {
     }
 }
 
-void loopMedia() {
-    uint16_t tx, ty;
-    bool     pressed = tft.getTouch(&tx, &ty);
-    if (pressed) {
-        ty = tft.height() - ty;
+void loopMedia(const tft_ui::TouchEvent& touch) {
+    if (touch.pressed) {
         if (showConfirmDialog) {
-            ui_handle_dialog_touch(tx, ty);  // Manejar el diálogo
+            ui_handle_dialog_touch(touch.x, touch.y);  // Manejar el diálogo
         } else {
-            ui_handle_media_touch(tx, ty);  // Manejar la lista de archivos
+            ui_handle_media_touch(touch.x, touch.y);  // Manejar la lista de archivos
         }
     }
 }
@@ -1301,13 +1214,10 @@ void ui_loop() {
     if (currSDState != prevSDState) {
         // CASO A: Acaba de empezar a imprimir (desde WebUI, Serial o TFT)
         if (currSDState == SDState::BusyPrinting) {
-            jobStartTime        = millis();
-            totalPauseTime      = 0;
-            pauseStartTimestamp = 0;
-            isTimerPaused       = false;
-            ui_state            = UI_HOME;  // Forzar cambio al estado HOME
-            tft.fillScreen(BG_COLOR);       // Limpiar pantalla
-            ui_show_work();                 // Cargar interfaz de Trabajo/Progreso
+            tft_ui::Manager::on_job_started(runtimeState);
+            ui_state = tft_ui::UI_HOME;               // Forzar cambio al estado HOME
+            tft.fillScreen(tft_ui::BG_COLOR);  // Limpiar pantalla
+            ui_show_work();                           // Cargar interfaz de Trabajo/Progreso
         }
         // CASO B: Acaba de terminar de imprimir (o se canceló)
         else if (prevSDState == SDState::BusyPrinting) {
@@ -1316,9 +1226,9 @@ void ui_loop() {
             } else {
                 existSD = false;
             }
-            ui_state = UI_HOME;        // Volver a HOME
-            tft.fillScreen(BG_COLOR);  // Limpiar pantalla
-            ui_show_home();            // Cargar interfaz de Inicio normal
+            ui_state = tft_ui::UI_HOME;  // Volver a HOME
+            tft.fillScreen(tft_ui::BG_COLOR);
+            ui_show_home();  // Cargar interfaz de Inicio normal
         }
 
         // Actualizar el estado previo para el siguiente ciclo
@@ -1326,85 +1236,81 @@ void ui_loop() {
     }
     // ============================================================
 
-    // Máquina de Estados Normal (Tu código existente)
+    tft_ui::TouchEvent touch = touchReader.read(tft);
+
+    // Máquina de Estados Normal
     switch (ui_state) {
-        case UI_HOME:
+        case tft_ui::UI_HOME:
             loopHome();
             break;
-        case UI_MEDIA:
-            loopMedia();
+        case tft_ui::UI_MEDIA:
+            loopMedia(touch);
             break;
-        case UI_CONTROL:
-            loopJOG();
+        case tft_ui::UI_CONTROL:
+            loopJOG(touch);
             break;
         default:
             break;
     }
 
-    // Solo si se presiona botones definidos no dinamicos
-    uint16_t tx, ty;
-    bool     pressed = tft.getTouch(&tx, &ty);
-    // Invertiri el eje Y del touch a la esquina izquierda superior
-    // Debido que al imprimir y dibujar en la pantalla ese es el punto 0,0
-    // Sin embargo al obtener el touch no lo es.
-    if (pressed) {
-        ty      = tft.height() - ty;
-        int btn = ui_get_touched_button(tx, ty);
+    if (touch.pressed) {
+        int btn = ui_get_touched_button(touch.x, touch.y);
         if (btn >= 0) {
+            tft_ui::UIState next_state = ui_state;
             switch (btn) {
                 case 0:
-                    ui_state = UI_HOME;
+                    next_state = tft_ui::UI_HOME;
                     break;
                 case 1:
-                    ui_state = UI_MEDIA;
+                    next_state = tft_ui::UI_MEDIA;
                     break;
                 case 2:
-                    ui_state = UI_CONTROL;
+                    next_state = tft_ui::UI_CONTROL;
                     break;
                 case 3:
-                    ui_state = UI_CONFIG;
+                    next_state = tft_ui::UI_CONFIG;
                     break;
                 case 6:
-                    if(ui_state == UI_HOME){
-                        ui_state = UI_HOME;
+                    if (ui_state == tft_ui::UI_HOME) {
                         ui_toggle_pause_resume();
                     }
+                    next_state = tft_ui::UI_HOME;
                     break;
                 case 7:
-                    if(ui_state == UI_HOME){
-                        ui_state = UI_HOME;
+                    if (ui_state == tft_ui::UI_HOME) {
                         ui_stop_job();
                     }
+                    next_state = tft_ui::UI_HOME;
                     break;
                 default:
-                    ui_state = NO_CHANGE;
+                    next_state = tft_ui::NO_CHANGE;
                     break;
             }
 
-            // Cambiar de pantalla
-            switch (ui_state) {
-                case UI_HOME:
-                    if (get_sd_state(false) == SDState::BusyPrinting) {
-                        ui_show_work();
-                    } else {
-                        ui_show_home();
-                    }
-                    break;
-                case UI_MEDIA:
-                    scrollIndex = 0;
-                    scanDirectory("/");
-                    ui_show_media();
-                    break;
-                case UI_CONTROL:
-                    ui_show_control();
-                    break;
-                case UI_CONFIG:
-                    ui_show_config();
-                    break;
-                case NO_CHANGE:
-                    break;
-                default:
-                    break;
+            if (tft_ui::should_redraw_screen(ui_state, next_state)) {
+                ui_state = next_state;
+                switch (ui_state) {
+                    case tft_ui::UI_HOME:
+                        if (get_sd_state(false) == SDState::BusyPrinting) {
+                            ui_show_work();
+                        } else {
+                            ui_show_home();
+                        }
+                        break;
+                    case tft_ui::UI_MEDIA:
+                        scrollIndex = 0;
+                        scanDirectory("/");
+                        ui_show_media();
+                        break;
+                    case tft_ui::UI_CONTROL:
+                        ui_show_control();
+                        break;
+                    case tft_ui::UI_CONFIG:
+                        ui_show_config();
+                        break;
+                    default:
+                        break;
+                }
             }
         }
     }
@@ -1413,7 +1319,6 @@ void ui_loop() {
 void displayUpdate(void* pvParameters) {
     TickType_t       xLastWakeTime;
     const TickType_t xDisplayFrequency = pdMS_TO_TICKS(100);
-
     tft.fillScreen(TFT_BLACK);
     tft.setTextColor(TFT_WHITE);
     tft.setTextFont(1);
@@ -1424,6 +1329,7 @@ void displayUpdate(void* pvParameters) {
     tft.setTextSize(1);
     tft.setTextColor(TFT_YELLOW);
     tft.drawString(GRBL_VERSION, tft.width() / 2, (tft.height() / 2) + 20);
+    tft.setTextColor(TFT_WHITE);
     tft.setTextColor(TFT_WHITE);
     uint8_t  cardType = SD.cardType();
     uint64_t cardSize = SD.cardSize() / (1024 * 1024);
@@ -1442,10 +1348,8 @@ void displayUpdate(void* pvParameters) {
     }
     String size_str = "SD Card Size: " + String((unsigned long)cardSize) + " MB";
     tft.drawString(size_str, tft.width() / 2, (tft.height() / 2) + 50);
-
     vTaskDelay(pdMS_TO_TICKS(3000));
     xLastWakeTime = xTaskGetTickCount();
-
     tft.setTextSize(1);
     tft.setTextFont(1);
     tft.fillScreen(TFT_BLACK);
