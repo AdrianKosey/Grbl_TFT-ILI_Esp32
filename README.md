@@ -1,110 +1,102 @@
+# ILI TFT + GRBL ESP32 Interface
 
+## CNC Touch Interface for ESP32
 
-# Grbl (CNC Controller) For ESP32
+This project is a touch interface developed to control a CNC machine using an ESP32 and an ILI TFT touchscreen.
 
-## Get the Next Generation!
+The interface allows for visual, intuitive, and fast interaction with the machine, displaying relevant information in real time and allowing actions to be executed directly from the screen.
 
-<img src="https://github.com/bdring/FluidNC/wiki/images/logos/FluidNC.svg" width="200">
+---
 
-The next generation of Grbl_ESP32 was such a massive upgrade we decided to change the name. It is called **FluidNC** and is [available here](https://github.com/bdring/FluidNC). Please check it out and give us a star. It is compatible with all Grbl_ESP32 hardware.
+# Interface
 
-This version is only being maintained with existing features. All new features are targeted at FluidNC.
+## 🔹 Work Screen
 
-### Project Overview
+![Home Screen](assets/main.jpg)
 
-Grbl_ESP32 started as a port of [Grbl](https://github.com/gnea/grbl) to the ESP32. The power of the ESP32 has allowed this firmware to grow far beyond the limitations of 8-bit AVR controllers. Here are some of the current features
+View where you can observe the work in progress and perform actions such as pausing or stopping the job.
 
-- **Motors**
-  - Control up to 6 coordinated axes (XYZABC)
-  - Each axis can have 1 or 2 motors each for a total of 12 motors
-  - Dual motors axes can optionally auto square using a home switch and independent control for each motor.
-  - Motor drivers can be dynamically assigned to axes, so a 4 motor XYZA controller could be converted to a XYYZ (dual motor Y axis) without any hardware changes.
-  - Step rates up to 120,000 per/second.
-  - Trinamic (SPI controlled) stepper motors are supported including StealthChop, CoolStep and StallGuard modes. Sensorless homing can be used.
-  - Unipolar stepper motor can be directly driven
-  - RC hobby servos can be used as coordinated motors with acceleration and speed control. 
-- **Peripherals**
-  - Limit/Homing Switches with debouncing
-  - User input buttons (hold, resume, reset)
-  - Coolant control (Mist, Flood)
-  - Z Probe (any axis)
-  - Safety Door (open door safely retracts and stops spindle, can be resumed)
-  - Additional I/O via shift register and I/O expanders supported (on dev branches)
-- **Job Control**
-  - Instant feed hold and resume
-  - Feed rate override
-  - Spindle speed override
-- **Spindles**
-  - PWM
-  - RS485 Modus
-  - DAC (analog voltage) 0-10V
-  - Relay Based
-  - RC type Brushless DC motors using low cost BESCs
-  - Laser PWM with power/speed compensation
-  - Easy to create custom spindles
-- **Connectivity**
-  - USB/Serial
-  - Bluetooth/Serial Creates a virtual serial port on your phone or PC. Standard serial port applications can use Bluetooth.
-  - WIFI
-    - Creates its own access point or connects to yours.
-    - Built in web server. The server has full featured CNC control app that will run on your phone or PC in a browser. No app required.
-    - Telnet sending of gcode
-    - Push notifications (like...job done, get a text/email)
-    - OTA (over the air) firmware upgrades.
-- SD card. Gcode can be loaded and run via WIFI.
-- **Compatibility** 
-  - Grbl_ESP32 is fully backward compatible with Grbl and can use all gcode senders.
-- **Customizable**
-  - Easy to map pins to any functions.  
-  - Custom machines can be designed without touching the main code.   
-  - Custom initialization
-    - Kinematics
-    - Custom homing
-    - Tool changer sequences
-    - Button macros (run gcode sequence, etc.)
-    - Custom end of Job sequence
-    - RTOS Real time operating system allows background monitoring and  control without affecting motion control performance
-  
-- Fast boot
-  
-  - It boots in about 2 seconds (unlike Raspberry Pi, Beagle Bone). Does not need to be formally shut down. Just kill the power
+---
 
-### Test Drive It
+## 🔹 Jog Control
 
-Grbl_ESP32 has a test drive mode. If you just compile it and load it onto an ESP32, it will create a virtual machine without any pins mapped. This allows you to safely test drive it without any attached hardware. Everything is functional including the WIFI and web user interface. Things like homing, that require feedback from actual switches cannot be done.
+![Status Screen](assets/jog.jpg)
 
-### Using It
+Real-time display of the machine's status and position, allowing manipulation of the 3 axes or performing actions such as home or set zero.
 
-Important compiling instructions are [in the wiki](https://github.com/bdring/Grbl_Esp32/wiki/Compiling-the-firmware)
+---
 
-The code should be compiled using the latest Arduino IDE. [Follow instructions here](https://github.com/espressif/arduino-esp32) on how to setup ESP32 in the IDE. The choice was made to use the Arduino IDE over the ESP-IDF to make the code a little more accessible to novices trying to compile the code.
+## 🔹 SD Navigation
 
-I use the ESP32 Dev Module version of the ESP32. I suggest starting with that if you don't have hardware yet.
+![SD Browser](assets/file_manager.jpg)
 
-For basic instructions on using Grbl use the [gnea/grbl wiki](https://github.com/gnea/grbl/wiki). That is the Arduino version of Grbl, so keep that in mind regarding hardware setup. If you have questions ask via the GitHub issue system for this project.
+Browse files directly from the SD card, including the ability to start jobs from it.
 
-### Roadmap
+---
 
-The roadmap is now [on the wiki](https://github.com/bdring/Grbl_Esp32/wiki/Development-Roadmap).
+# What does it do?
 
-### Credits
+- Displays a customized home screen
+- Allows navigation between different views
+- Detects touch interaction
+- Manages graphical buttons with active/inactive icons
+- Displays machine status information
+- Supports SD card reading
+- Designed to integrate with GRBL on ESP32
 
-The original [Grbl](https://github.com/gnea/grbl) is an awesome project by Sungeon (Sonny) Jeon. I have known him for many years and he is always very helpful. I have used Grbl on many projects. I only ported because of the limitation of the processors it was designed for. The core engine design is virtually unchanged.
+---
 
-The Wifi and WebUI is based on [this project.](https://github.com/luc-github/ESP3D-WEBUI)  
+# Project Goal
 
-### Contribute
+To create a modern, organized, and scalable interface for machines controlled by ESP32, offering a clear and professional user experience.
 
-<img src="https://discord.com/assets/e05ead6e6ebc08df9291738d0aa6986d.png" width="8%"> There is a Discord server for the development this project. Ask for an invite
+The goal is to build a solid foundation that allows for continued system expansion without sacrificing order or stability.
 
-### FAQ
+---
 
-Start asking questions...I'll put the frequent ones here.
+# Main Features
 
+- Optimized touch interface
+- Dynamic button system
+- Smooth screen switching
+- Ready for real CNC control
+- Modular and expandable design
 
+---
 
-### <a name="donation"></a>Donation
+# Hardware Used
 
-This project requires a lot of work and often expensive items for testing. Please consider a safe, secure and highly appreciated donation via the PayPal link below or via the Github sponsor link at the top of the page.
+- ESP32
+- ILI TFT touchscreen
+- SD card
+- GRBL-compatible CNC
 
-[![](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=TKNJ9Z775VXB2)
+---
+
+# Author
+
+Developed by **Kosey**
+
+Interface designed and programmed as part of a personal project focused on creating a more organized and professional solution for home CNC control using an ESP32.
+
+---
+
+# Project Status
+
+Actively under development.
+
+Currently focused on:
+
+- Visual optimization
+- Improved internal states
+- Advanced integration with GRBL
+- Greater SD card read stability
+
+# Compiling warnings
+
+The TFT ILI library used in PlatformIO is not compatible with the current version of grbl, so some local changes to the library are required.
+
+---
+
+#More information about GRBL ESP32
+https://github.com/bdring/Grbl_Esp32
